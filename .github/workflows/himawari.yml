@@ -1,0 +1,105 @@
+name: himawari-asap-dan-api
+
+# Dua layer PENGAMATAN untuk Smokewatch, asap dan debu, lalu titik panas.
+# CAMS itu model, dia menghitung asap seharusnya ada di mana. Satelit
+# menunjukkan asapnya sungguh sungguh ada di mana.
+#
+# POLANYA SAMA dengan alur kerja satelit di repo Atmosight. Keluaran situs
+# terakhir dipulihkan dari cache, bagian satelit diperbarui, lalu situsnya
+# diterbitkan ulang. Tanpa itu terbitan dari sini akan MENGHAPUS keluaran
+# CAMS, sebab GitHub Pages mengganti seluruh situs tiap kali diterbitkan.
+#
+# SEJAM SEKALI, bukan setengah jam. Tiap bingkai butuh empat kanal, jadi
+# bobot unduhannya empat kali lipat Atmosight.
+on:
+  schedule:
+    - cron: "7 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  masak:
+    runs-on: ubuntu-latest
+    outputs:
+      berubah: ${{ steps.masak.outputs.berubah }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Pasang pustaka
+        run: pip install --quiet numpy Pillow
+
+      - name: Pulihkan keluaran situs dari cache
+        uses: actions/cache/restore@v4
+        with:
+          path: backend/data/output
+          key: site-output-none
+          restore-keys: |
+            site-output-
+
+      - name: Masak asap dan titik panas
+        id: masak
+        run: |
+          if [ ! -f backend/data/output/cams/catalog.json ]; then
+            echo "cache keluaran belum ada, lewati, deploy utama tetap jalan"
+            echo "berubah=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # Yang dibandingkan ISI berkasnya, bukan daftar namanya, supaya
+          # perbaikan cara menggambar pada bingkai yang namanya sama ikut
+          # terdeteksi dan terbit.
+          sebelum=$(cat backend/data/output/himawari/* 2>/dev/null | md5sum)
+          python backend/pipeline/himawari_run.py
+          sesudah=$(cat backend/data/output/himawari/* 2>/dev/null | md5sum)
+          if [ "$sebelum" = "$sesudah" ]; then
+            echo "tidak ada yang baru, tidak diterbitkan ulang"
+            echo "berubah=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "berubah=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Simpan keluaran ke cache
+        if: steps.masak.outputs.berubah == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: backend/data/output
+          key: site-output-${{ github.run_id }}
+
+      - name: Rakit situs, jaga struktur ../backend/data/output
+        if: steps.masak.outputs.berubah == 'true'
+        run: |
+          mkdir -p _site/frontend _site/backend/data/output
+          cp -r frontend/. _site/frontend/
+          cp -r backend/data/output/. _site/backend/data/output/
+          cat > _site/index.html <<'HTML'
+          <!doctype html><meta charset="utf-8">
+          <title>Smokewatch, peta kualitas udara interaktif Indonesia</title>
+          <meta http-equiv="refresh" content="0; url=./frontend/index.html">
+          <a href="./frontend/index.html">Buka Smokewatch</a>
+          HTML
+
+      - uses: actions/upload-pages-artifact@v3
+        if: steps.masak.outputs.berubah == 'true'
+        with:
+          path: _site
+
+  terbit:
+    needs: masak
+    if: needs.masak.outputs.berubah == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

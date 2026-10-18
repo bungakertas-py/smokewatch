@@ -87,6 +87,17 @@ jobs:
           echo "::warning::Commit-back arsip harian gagal setelah 3 percobaan. Datanya tetap ikut terbit ke Pages, cuma riwayatnya tidak tersimpan ke repo kali ini."
 
 
+      # Keluaran disimpan ke cache supaya alur kerja Himawari bisa
+      # memulihkannya lalu menerbitkan ulang SELURUH situs. Tanpa ini,
+      # terbitan dari alur kerja itu akan menghapus keluaran CAMS, sebab
+      # GitHub Pages mengganti seluruh situs tiap kali diterbitkan.
+      # Polanya sama dengan yang sudah dipakai di repo Atmosight.
+      - name: Simpan keluaran ke cache untuk alur kerja satelit
+        uses: actions/cache/save@v4
+        with:
+          path: backend/data/output
+          key: site-output-${{ github.run_id }}
+
       - name: Assemble site (jaga struktur ../backend/data/output)
         run: |
           mkdir -p _site/frontend _site/backend/data/output
