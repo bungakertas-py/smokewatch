@@ -51,7 +51,12 @@ jobs:
       - name: Masak asap dan titik panas
         id: masak
         run: |
-          if [ ! -f backend/data/output/cams/catalog.json ]; then
+          # Katalog CAMS duduk di AKAR keluaran, bukan di subfolder cams.
+          # Penjagaan yang menunjuk subfolder tidak pernah terpenuhi walau
+          # cache-nya sudah pulih 185 MB, dan alur kerjanya berhenti terus
+          # dengan alasan yang salah. Susunan ini sama dengan repo Atmosight,
+          # akar untuk model global dan subfolder untuk yang lain.
+          if [ ! -f backend/data/output/catalog.json ]; then
             echo "cache keluaran belum ada, lewati, deploy utama tetap jalan"
             echo "berubah=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
