@@ -86,7 +86,9 @@ SEGMEN = range(2, 10)
 #      dua citra berurutan, jadi domainnya penuh sampai 62 BT
 #   5  skala puncak awan jadi inferno sepuluh tingkat, -70 sampai -10
 #   6  batas hangatnya naik ke -5, jadi sebelas tingkat
-VERSI_RENDER = 6
+#   7  -5 jadi tingkat berwarna terakhir, beningnya ke -3, dan
+#      tingkatnya dipangkas dari dua belas jadi TUJUH
+VERSI_RENDER = 7
 
 # IRAMA HARIAN, satu bingkai per hari di jam yang sama, lima hari ke
 # belakang. Diputuskan pemilik 19 Oktober 2026, menggantikan irama 30 menit
@@ -120,41 +122,41 @@ JEDA_GERAK_MENIT = 30
 
 LAYER = "cloudtop_temp"
 
-# Skala derajat Celsius, INFERNO, sebelas tingkat berjarak 6 derajat dari
-# -70 sampai -10, lalu bening di -5.
+# Skala derajat Celsius, INFERNO, TUJUH tingkat dari -70 sampai -5, lalu
+# bening di -3.
 #
-# Diminta pemilik 19 Oktober 2026. Versi lama memakai abu dan kelabu di -32
-# sampai 0, sehingga sebagian besar awan terbaca kelabu rata dan yang
-# berwarna cuma inti yang paling dingin.
+# Jumlah tingkatnya diputuskan pemilik sesudah mencoba dua belas dan merasa
+# terlalu ramai. Tujuh itu masih cukup untuk membedakan inti dari tepi, dan
+# tiap selnya jadi cukup lebar untuk dibaca di legenda.
 #
-# RENTANGNYA DIPILIH DARI DATA, bukan ditebak. Percobaan pertama -90 sampai
-# -70, dan itu diukur dulu pada tiga hari, 15, 17, dan 19 Oktober. Hasilnya
-# TIDAK ADA SATU PUN piksel yang lebih dingin dari -90, dan yang lebih
-# dingin dari -80 cuma 0,03 persen di hari terbaik. Delapan dari sepuluh
-# tingkatnya tidak akan pernah terpakai, dan yang tampil cuma belasan bintik
-# kuning di peta kosong, 0,08 persen domain. Pemilik mengoreksi sendiri
-# sesudah melihat angkanya, batas dinginnya jadi -70.
+# JARAKNYA 11 DERAJAT, bukan angka bulat, dan itu akibat dua ujungnya yang
+# dipatok. Pemilik memilih -70 sebagai yang terdingin dan -5 sebagai tingkat
+# berwarna terakhir, dan membaginya jadi tujuh memberi 10,8 derajat per
+# langkah yang dibulatkan jadi 11. Kalau suatu saat angka bulat lebih
+# penting daripada ujungnya, -65 sampai -5 memberi langkah 10 persis, dan
+# yang hilang cuma label -70 sebab yang lebih dingin dari -65 toh dipatok ke
+# warna yang sama.
 #
-# Batas hangatnya dinaikkan ke -5 pada 19 Okt sore, dari -10, supaya awan
-# menengah yang hangat ikut terlihat. Berwarna 16,6 persen domain, naik
-# dari 14,1 persen. Paling dingin ungu tua, naik lewat magenta dan merah
-# ke oranye dan kuning, lalu memudar ke bening antara -10 dan -5 sehingga
-# tepinya halus, bukan terpotong.
+# RENTANGNYA DIPILIH DARI DATA. Percobaan pertama -90 sampai -70, dan itu
+# diukur dulu pada tiga hari. Tidak ada satu pun piksel yang lebih dingin
+# dari -90, dan yang lebih dingin dari -80 cuma 0,03 persen di hari terbaik.
+# Delapan dari sepuluh tingkatnya tidak akan pernah terpakai dan yang tampil
+# cuma 0,08 persen domain. Pemilik mengoreksi sendiri sesudah melihat
+# angkanya, lalu batas hangatnya digeser dua kali sampai -5.
+#
+# Paling dingin ungu tua, naik lewat magenta dan merah ke oranye dan kuning,
+# lalu memudar ke bening antara -5 dan -3 sehingga tepinya halus.
 #
 # ANGKA DI SINI WAJIB SAMA dengan legenda cloudtop_temp di app.js.
 SKALA = [
     (-70, (0x36, 0x09, 0x61, 252)),
-    (-64, (0x55, 0x0f, 0x69, 249)),
-    (-58, (0x73, 0x19, 0x6e, 246)),
-    (-52, (0x91, 0x26, 0x68, 243)),
-    (-46, (0xae, 0x36, 0x5c, 240)),
-    (-40, (0xcb, 0x48, 0x4b, 237)),
-    (-34, (0xe2, 0x62, 0x33, 234)),
-    (-28, (0xf4, 0x81, 0x16, 231)),
-    (-22, (0xfb, 0xaa, 0x12, 228)),
-    (-16, (0xfc, 0xcd, 0x3e, 225)),
-    (-10, (0xfb, 0xe1, 0x7a, 222)),
-    (-5, (0xfd, 0xf0, 0xb8, 0)),
+    (-59, (0x69, 0x16, 0x6e, 248)),
+    (-48, (0x95, 0x28, 0x67, 244)),
+    (-37, (0xc4, 0x43, 0x4f, 240)),
+    (-26, (0xe8, 0x69, 0x2c, 234)),
+    (-15, (0xfb, 0xa1, 0x0e, 228)),
+    (-5, (0xfa, 0xde, 0x72, 220)),
+    (-3, (0xfd, 0xf2, 0xcc, 0)),
 ]
 
 
