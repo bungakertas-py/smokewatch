@@ -92,6 +92,58 @@ jobs:
       # terbitan dari alur kerja itu akan menghapus keluaran CAMS, sebab
       # GitHub Pages mengganti seluruh situs tiap kali diterbitkan.
       # Polanya sama dengan yang sudah dipakai di repo Atmosight.
+      # SATELIT DIPERTAHANKAN, dan langkah ini WAJIB ada.
+      #
+      # Keluaran Himawari dimasak alur kerja himawari.yml dan tinggal di
+      # subfolder himawari/. Langkah merakit di bawah menerbitkan ULANG
+      # SELURUH situs dari backend/data/output yang baru saja dibangun di
+      # sini, dan folder itu tidak pernah berisi satelit. Tanpa langkah ini
+      # folder satelit IKUT TERHAPUS dari GitHub Pages.
+      #
+      # SUDAH KEJADIAN 19 Oktober 2026. Alur kerja ini dijalankan tangan,
+      # dan sesudahnya sumber Satelit Himawari-9 mati di situs dengan pesan
+      # "Model ini belum punya data", sampai alur kerja satelit dijalankan
+      # ulang. himawari.yml sendiri sudah lama menjaga arah sebaliknya,
+      # giliran yang ini yang belum.
+      #
+      # Diambil dari situs yang sedang hidup, BUKAN dari cache, supaya
+      # tidak ada urusan kunci cache yang saling menimpa dengan himawari.yml.
+      # Bingkai yang gagal diunduh DIBUANG dari katalog, jadi yang terbit
+      # tidak pernah menunjuk gambar yang tidak ada.
+      - name: Ambil lagi keluaran satelit dari situs hidup
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          B = "https://bungakertas-py.github.io/smokewatch/backend/data/output/himawari/"
+          D = "backend/data/output/himawari"
+          try:
+              kat = json.loads(urllib.request.urlopen(B + "catalog.json", timeout=60).read())
+          except Exception as e:
+              print("satelit belum ada di situs, dilewati,", e)
+              raise SystemExit
+          os.makedirs(D, exist_ok=True)
+          perlu = sorted({f["preview_image"] for L in kat["layers"].values() for f in L["frames"]})
+          jadi = set()
+          for x in perlu:
+              try:
+                  b = urllib.request.urlopen(B + x, timeout=180).read()
+                  with open(os.path.join(D, x), "wb") as fh:
+                      fh.write(b)
+                  jadi.add(x)
+              except Exception as e:
+                  print("  gagal", x, e)
+          for nama, L in list(kat["layers"].items()):
+              L["frames"] = [f for f in L["frames"] if f["preview_image"] in jadi]
+              if not L["frames"]:
+                  del kat["layers"][nama]
+          if not kat.get("layers"):
+              print("tidak ada bingkai satelit yang selamat, folder dikosongkan")
+              raise SystemExit
+          with open(os.path.join(D, "catalog.json"), "w") as fh:
+              json.dump(kat, fh)
+          print("satelit dipertahankan, %d dari %d bingkai" % (len(jadi), len(perlu)))
+          PY
+
       - name: Simpan keluaran ke cache untuk alur kerja satelit
         uses: actions/cache/save@v4
         with:
