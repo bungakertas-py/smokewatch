@@ -1,19 +1,24 @@
-name: himawari-asap-dan-api
+name: himawari-smokewatch
 
-# Dua layer PENGAMATAN untuk Smokewatch, asap dan debu, lalu titik panas.
-# CAMS itu model, dia menghitung asap seharusnya ada di mana. Satelit
-# menunjukkan asapnya sungguh sungguh ada di mana.
+# Tiga layer PENGAMATAN untuk Smokewatch, True Color RGB, Brightness
+# Temperature, dan Atmospheric Motion Vectors. CAMS itu model, dia
+# menghitung polutan seharusnya ada di mana. Satelit menunjukkan keadaan
+# yang sedang terjadi.
+#
+# PARAMETERNYA SAMA PERSIS dengan repo Atmosight, atas permintaan pemilik,
+# dan berkas pipeline-nya memang salinan dari sana. Dust RGB dan Active
+# Fire Detection dibuang bersamaan dengan itu.
 #
 # POLANYA SAMA dengan alur kerja satelit di repo Atmosight. Keluaran situs
 # terakhir dipulihkan dari cache, bagian satelit diperbarui, lalu situsnya
 # diterbitkan ulang. Tanpa itu terbitan dari sini akan MENGHAPUS keluaran
 # CAMS, sebab GitHub Pages mengganti seluruh situs tiap kali diterbitkan.
-#
-# SEJAM SEKALI, bukan setengah jam. Tiap bingkai butuh empat kanal, jadi
-# bobot unduhannya empat kali lipat Atmosight.
 on:
   schedule:
-    - cron: "7 * * * *"
+    # Tiap setengah jam, sama dengan Atmosight. Dulu sejam, sebab tiap
+    # bingkai butuh empat kanal inframerah. Sekarang yang inframerah cuma
+    # kanal 13, jadi bobotnya sudah sama.
+    - cron: "*/30 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -48,7 +53,7 @@ jobs:
           restore-keys: |
             site-output-
 
-      - name: Masak asap dan titik panas
+      - name: Masak citra satelit
         id: masak
         run: |
           # Katalog CAMS duduk di AKAR keluaran, bukan di subfolder cams.

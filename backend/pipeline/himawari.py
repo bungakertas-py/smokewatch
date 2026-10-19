@@ -1,37 +1,34 @@
 # -*- coding: utf-8 -*-
-"""Dua produk satelit untuk Smokewatch, dari Himawari-9.
+"""Suhu puncak awan dari Himawari-9, kanal 13.
 
-   KENAPA DI SMOKEWATCH. CAMS itu MODEL, dia menghitung asap seharusnya ada
-   di mana. Satelit menunjukkan asapnya SUNGGUH SUNGGUH ada di mana. Waktu
-   karhutla, dua duanya bersebelahan itu cerita yang kuat, dan selisih di
-   antara keduanya justru yang paling berguna.
+   KENAPA INI ADA. Semua layer Smokewatch yang lain isinya MODEL, CAMS
+   menghitung polutan seharusnya ada di mana. Satelit menunjukkan keadaan
+   yang sedang terjadi, jadi modelnya bisa diadu dengan pengamatan. Kanal
+   13 yang paling berguna sebab suhu puncak awan itu penanda langsung
+   kedalaman konveksi, dan konveksi itu yang mengaduk polutan ke atas.
 
-   Yang dibuat dua.
+   BERKASNYA SALINAN DARI REPO ATMOSIGHT, dan sengaja dibuat sama persis
+   supaya kedua app menampilkan parameter satelit yang identik. Kalau satu
+   disetel, yang lain ikut disetel. Yang beda cuma dua paragraf pembuka
+   ini dan di himawari_run.py.
 
-   1. DEBU DAN ABU, dari selisih kanal 11, 13, dan 15. Jalan siang dan
-      malam.
+   SUMBERNYA ember terbuka NOAA di AWS, bukan JAXA P-Tree. Dua duanya punya
+   datanya, tapi P-Tree melarang mengedarkan ulang ke pihak ketiga sedangkan
+   menayangkannya di situs publik itu pengedaran ulang. Ember NOAA tidak
+   punya batasan itu dan tidak perlu akun sama sekali.
 
-      NAMANYA SENGAJA BUKAN ASAP. Resep ini memang dipakai untuk debu dan
-      abu vulkanik, dan dua duanya penting di Indonesia. Tapi ASAP
-      KEBAKARAN hampir tidak terlihat di inframerah termal, butirannya
-      terlalu halus untuk mengubah pancaran di 8 sampai 12 mikrometer.
-      Yang terlihat jelas itu di cahaya tampak, dan kanal tampaknya
-      beresolusi setengah kilometer sehingga satu bingkai saja 272 MB,
-      terlalu berat untuk irama sejam. Jadi untuk kebakaran, yang
-      diandalkan layer Titik Panas di sebelahnya.
-   2. TITIK PANAS, dari kanal 7 di 3,9 mikrometer. Tiap sepuluh menit,
-      dibanding VIIRS yang cuma dua kali sehari. Hasilnya INDIKATIF, bukan
-      produk kebakaran resmi, dan itu disebut terang terangan di legenda.
+   TIDAK MEMAKAI SATPY. Yang diperlukan cuma satu kanal inframerah dan satu
+   proyeksi geostasioner yang rumusnya tertutup, sedangkan satpy menyeret
+   pyresample, xarray, dan dask. Di GitAction itu tiga menit pasang dan
+   ratusan megabita, untuk pekerjaan yang muat di satu berkas.
 
-   Pembaca HSD-nya salinan dari repo Atmosight, hsd.py di sebelah. Sengaja
-   disalin, bukan dibuat pustaka bersama, sebab dua repo ini memang berdiri
-   sendiri dan sudah menyalin beberapa hal lain dengan alasan yang sama.
-   Kalau formatnya berubah, dua duanya harus disetel."""
+   Pembaca HSD-nya ada di hsd.py, sebelah."""
 from __future__ import annotations
 
 import datetime as dt
+import json
+import os
 import re
-import time
 import urllib.request
 from pathlib import Path
 
@@ -41,62 +38,133 @@ from PIL import Image
 from . import hsd
 
 EMBER = "https://noaa-himawari9.s3.amazonaws.com"
+SAT = "h09"
 
-# Domain DISAMAKAN dengan CAMS, dibaca dari katalognya yang sedang hidup.
-LON0, LON1, LAT0, LAT1 = 62.0, 180.0, -32.8, 32.8
-DERAJAT = 0.05
+# Domainnya DISAMAKAN dengan GFS dan CAMS, 62BT sampai 180BT, 33LS sampai
+# 33LU. Pas sekali kebetulan, piringan Himawari mulai penuh di 61,9BT di
+# khatulistiwa. Yang tidak kebagian cuma pojok barat laut dan barat daya,
+# sebab tepi piringan itu melengkung, dan di situ sudutnya memang terlalu
+# miring untuk dipakai.
+LON0, LON1, LAT0, LAT1 = 62.0, 180.0, -33.0, 33.0
+DERAJAT = 0.05                 # 5,5 km, kira kira dua kali resolusi asli 2 km
+
+# TEPI BARAT. Versi pertama memotong keras di sudut zenit 80 derajat, dan itu
+# SALAH. Yang terjadi, data berhenti di 69,3BT di khatulistiwa dan 73,0BT di
+# lintang 33, padahal domain kita mulai di 62,0BT. Jadi sepuluh derajat paling
+# barat hilang bukan karena satelitnya tidak melihat, tapi karena kupotong
+# sendiri.
+#
+# Piringan Himawari-9 sebenarnya sampai 59,5BT di khatulistiwa dan 61,1BT di
+# lintang 33, jadi SELURUH domain kita sebetulnya terlihat.
+#
+# Sekarang yang dipakai batas piringan sungguhan, dan mutunya yang turun di
+# tepi disampaikan lewat ALFA YANG MEMUDAR, bukan lewat potongan. Di sudut 80
+# derajat satu piksel sudah memanjang enam kali, di 85 derajat sebelas kali,
+# jadi pembaca memang perlu tahu bahwa yang di tepi itu lebih kasar. Tapi
+# memudar itu memberi tahu, memotong itu menyembunyikan.
+ZEN_PUDAR_MULAI = 78.0         # sampai sini mutunya masih penuh
+ZEN_PUDAR_AKHIR = 88.0         # di luar ini tinggal sisa paling redup
+REDAM_MIN = 0.33
+
+# Segmen piringan yang menyentuh pita lintang kita. Dihitung dari geometri,
+# bukan ditebak, lalu dipatok supaya tidak perlu mengunduh sepuluh duanya.
+# Lintang 33LU jatuh di baris 1076 dan 33LS di baris 4425, dari 5500 baris.
 SEGMEN = range(2, 10)
-ZEN_PUDAR_MULAI, ZEN_PUDAR_AKHIR, REDAM_MIN = 78.0, 88.0, 0.33
 
-LANGKAH_MENIT = 60      # sejam, bukan setengah jam. Empat kanal per bingkai,
-JUM_BINGKAI = 6         # jadi bobotnya empat kali Atmosight.
+# CAP VERSI GAMBAR. Dinaikkan tiap kali cara menggambarnya berubah, misalnya
+# skala warna atau perlakuan tepi. Bingkai yang capnya beda DIGAMBAR ULANG
+# walaupun berkasnya sudah ada.
+#
+# Tanpa ini perbaikan render tidak pernah sampai ke bingkai lama. Pemulihan
+# dari cache membawa berkas lama, pemeriksa melihat berkasnya ada lalu
+# melewatinya, dan yang terbit tetap yang lama. Sudah kejadian tepat sesudah
+# tepi barat dibetulkan.
+#   1  potongan keras di zenit 80
+#   2  tepi dipudarkan sampai batas piringan
+#   3  layer angin gerak awan ditambahkan
+#   4  gerak awan tidak lagi dari produk AMV NOAA, dijejak sendiri dari
+#      dua citra berurutan, jadi domainnya penuh sampai 62 BT
 VERSI_RENDER = 4
 
-LAYER_ASAP = "debu_abu"
-LAYER_API = "titik_panas"
+LANGKAH_MENIT = 30
+# ENAM JAM ke belakang. Awalnya tiga jam, dan pemilik benar waktu bilang
+# sumbu waktunya terasa tidak punya masa lalu. Dua belas bingkai sudah cukup
+# untuk melihat awan tumbuh dan bergerak, dan karena yang baru tiap jalan
+# cuma satu, menambah riwayat itu murah sesudah jalan pertama.
+JUM_BINGKAI = 12
+LAYER = "cloudtop_temp"
 
-# Ambang titik panas. Angkanya patokan yang lazim dipakai untuk pengindraan
-# api geostasioner, dan sengaja KONSERVATIF supaya tidak memberi alarm palsu
-# di tanah gersang tengah hari.
-#   suhu 3,9 um mutlak harus tinggi, DAN selisihnya terhadap 10,4 um besar.
-# Selisih itu yang membedakan api dari permukaan yang sekadar panas, sebab
-# api memancar jauh lebih kuat di 3,9 um daripada di inframerah termal.
-# Ambangnya BEDA SIANG DAN MALAM, dan itu bukan kehati hatian berlebihan.
-# Di 3,9 mikrometer matahari ikut memantul, jadi permukaan yang sama
-# terbaca jauh lebih panas tengah hari. Dengan satu ambang untuk sepanjang
-# hari, jumlah titik melonjak dua puluh lima kali lipat antara pagi dan
-# tengah hari, dan lonjakan itu matahari, bukan api.
-API_BT39_SIANG = 322.0
-API_BT39_MALAM = 305.0
-API_SELISIH_MIN = 12.0
-API_SELISIH_KUAT = 25.0
+# Skala derajat Celsius. Yang hangat BENING supaya peta di bawahnya tembus,
+# sebab di situ memang tidak ada awan tinggi. Warnanya mulai berubah di
+# minus 40, dan itu bukan selera, minus 40 ambang yang biasa dipakai untuk
+# menandai konveksi dalam.
+# ANGKA DI SINI WAJIB SAMA dengan legenda cloudtop_temp di app.js.
+SKALA = [
+    (-90, (0x2e, 0x1c, 0x7d, 250)),
+    (-80, (0x75, 0x24, 0x8a, 248)),
+    (-70, (0xc2, 0x41, 0x5c, 245)),
+    (-60, (0xe0, 0x5a, 0x41, 240)),
+    (-50, (0xfc, 0xac, 0x1c, 235)),
+    (-40, (0xf9, 0xdc, 0x5c, 225)),
+    (-32, (0x5a, 0x6e, 0x82, 205)),
+    (-20, (0x96, 0xa5, 0xb4, 170)),
+    (0,   (0xc8, 0xd2, 0xdc, 110)),
+    (10,  (0xe6, 0xeb, 0xf0, 40)),
+    (20,  (0xff, 0xff, 0xff, 0)),
+]
 
 
-def _ambil(url: str, timeout: int = 300) -> bytes:
+def _ambil(url: str, timeout: int = 180) -> bytes:
     with urllib.request.urlopen(url, timeout=timeout) as r:
         return r.read()
 
 
 def slot_tersedia(batas: int = 300) -> list[dt.datetime]:
+    """Slot sepuluh menitan yang berkasnya sudah mendarat, terbaru dulu.
+
+    BATASNYA LONGGAR, dan itu disengaja. Pemotongan terjadi SEBELUM
+    penyaringan irama, jadi batas yang ketat memangkas slot yang justru
+    dibutuhkan. Dengan batas 12 dan irama sejam, yang lolos cuma dua
+    bingkai dari enam yang diminta, sebab dua belas slot sepuluh menitan
+    itu cuma dua jam. Sudah kejadian di dua app sekaligus.
+
+    Ember didaftar per jam, bukan ditebak dari jam dinding. Keterlambatan
+    Himawari biasanya setengah jam, tapi pernah lebih, dan menebak berarti
+    separuh unduhan jadi 404."""
     sekarang = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
     ada: list[dt.datetime] = []
-    for mundur in range(8):
+    # Tujuh jam ke belakang didaftar, cukup untuk mengisi dua belas bingkai
+    # setengah jaman walau beberapa slot bolong.
+    for mundur in range(7):
         jam = (sekarang - dt.timedelta(hours=mundur)).replace(minute=0, second=0, microsecond=0)
+        # Awalannya sampai JAM saja, lalu pembatas garis miring, supaya
+        # ember memulangkan daftar slot sepuluh menitan sebagai awalan
+        # bersama. Sempat kutulis memotong teks jam menit dan hasilnya
+        # awalan yang tidak pernah ada, daftarnya selalu kosong.
+        # Awalannya berhenti di JAM dan TANPA garis miring. Kunci aslinya
+        # menyatukan jam dan menit, ".../18/0700/...", jadi awalan
+        # ".../18/07/" tidak pernah cocok dan daftarnya selalu kosong.
+        # Sudah kena dua kali, sekali memotong teks, sekali menambah
+        # garis miring.
         pre = "AHI-L1b-FLDK/%s" % jam.strftime("%Y/%m/%d/%H")
+        url = "%s/?list-type=2&prefix=%s&delimiter=/" % (EMBER, pre)
         try:
-            xml = _ambil("%s/?list-type=2&prefix=%s&delimiter=/" % (EMBER, pre), 60).decode("utf-8", "replace")
+            xml = _ambil(url, 60).decode("utf-8", "replace")
         except Exception as e:
             print("  daftar ember gagal untuk %s, %s" % (pre, e))
             continue
         for p in re.findall(r"<Prefix>([^<]+)</Prefix>", xml):
             m = re.search(r"/(\d{4})/$", p)
-            if m:
-                ada.append(jam.replace(minute=int(m.group(1)[2:])))
-    return sorted(set(ada), reverse=True)[:batas]
+            if not m:
+                continue
+            ada.append(jam.replace(minute=int(m.group(1)[2:])))
+    ada = sorted(set(ada), reverse=True)
+    return ada[:batas]
 
 
 def pilih_bingkai(slot: list[dt.datetime]) -> list[dt.datetime]:
-    pakai = []
+    """Ambil satu slot tiap LANGKAH_MENIT, terbaru dulu."""
+    pakai: list[dt.datetime] = []
     for s in slot:
         if s.minute % LANGKAH_MENIT:
             continue
@@ -106,42 +174,25 @@ def pilih_bingkai(slot: list[dt.datetime]) -> list[dt.datetime]:
     return pakai
 
 
-def unduh_band(waktu: dt.datetime, band: int, folder: Path) -> list[Path]:
+def unduh(waktu: dt.datetime, folder: Path) -> list[Path]:
     folder.mkdir(parents=True, exist_ok=True)
-    res = "R05" if band == 3 else "R10" if band in (1, 2, 4) else "R20"
     jalur = []
     for s in SEGMEN:
-        nama = "HS_H09_%s_B%02d_FLDK_%s_S%02d10.DAT.bz2" % (
-            waktu.strftime("%Y%m%d_%H%M"), band, res, s)
+        nama = "HS_H09_%s_B13_FLDK_R20_S%02d10.DAT.bz2" % (waktu.strftime("%Y%m%d_%H%M"), s)
         tujuan = folder / nama
         if not tujuan.exists() or tujuan.stat().st_size < 1000:
-            # SEKALI DIULANG. Ember sesekali memutus sambungan di tengah
-            # jalan, dan satu segmen yang hilang meninggalkan pita kosong
-            # melintang di gambarnya. Sudah kejadian sekali.
             url = "%s/AHI-L1b-FLDK/%s/%s" % (EMBER, waktu.strftime("%Y/%m/%d/%H%M"), nama)
-            for coba in (1, 2):
-                try:
-                    tujuan.write_bytes(_ambil(url))
-                    break
-                except Exception as e:
-                    if coba == 2:
-                        print("    B%02d segmen %d gagal, %s" % (band, s, e))
-                    else:
-                        time.sleep(1.5)
-            else:
+            try:
+                tujuan.write_bytes(_ambil(url))
+            except Exception as e:
+                print("    segmen %d gagal, %s" % (s, e))
                 continue
         jalur.append(tujuan)
     return jalur
 
 
-_peta = {}
-
-
 def _kisi(h: dict):
-    """Peta kisi ke piksel satelit, dihitung sekali lalu disimpan."""
-    kunci = (h["kolom"], h["coff"], h["cfac"])
-    if kunci in _peta:
-        return _peta[kunci]
+    """Peta sekali pakai dari kisi lintang bujur ke piksel satelit."""
     lon = np.arange(LON0, LON1 + DERAJAT / 2, DERAJAT)
     lat = np.arange(LAT1, LAT0 - DERAJAT / 2, -DERAJAT)
     LON, LAT = np.meshgrid(lon, lat)
@@ -153,8 +204,11 @@ def _kisi(h: dict):
     r2 = -rl * np.cos(phi) * np.sin(d)
     r3 = rl * np.sin(phi)
     rn = np.sqrt(r1 * r1 + r2 * r2 + r3 * r3)
+    # Tampak kalau titiknya menghadap satelit, uji hasil kali titik, bukan
+    # tebakan sudut, jadi tepi piringannya persis.
     hadap = h["rs"] * np.cos(phi) * np.cos(d)
     tampak = hadap > rl
+    # Sudut zenit satelit, dipakai MEMUDARKAN tepi, bukan memotongnya.
     kos = np.clip((hadap - rl) / np.where(rn > 0, rn, 1), -1, 1)
     zen = np.degrees(np.arccos(kos))
     x = np.degrees(np.arctan2(-r2, r1))
@@ -168,16 +222,14 @@ def _kisi(h: dict):
     # itu memotong separuh sampai tiga perempat piringannya. Ketahuan waktu
     # kanal tampak pertama kali digrid, isinya cuma 50 dan 9 persen.
     sah = tampak & (kol >= 0) & (kol < h["kolom"]) & (bar >= 0) & (bar < h["kolom"])
-    redam = np.clip((ZEN_PUDAR_AKHIR - zen) / (ZEN_PUDAR_AKHIR - ZEN_PUDAR_MULAI),
-                    REDAM_MIN, 1.0).astype(np.float32)
-    _peta[kunci] = (kol, bar, sah, LON.shape, redam)
-    return _peta[kunci]
+    redam = np.clip((ZEN_PUDAR_AKHIR - zen) / (ZEN_PUDAR_AKHIR - ZEN_PUDAR_MULAI), REDAM_MIN, 1.0)
+    return kol, bar, sah, LON.shape, redam.astype(np.float32)
 
 
-def suhu_kisi(jalur: list[Path]):
-    """Suhu kecerahan satu kanal di kisi lintang bujur."""
+def bingkai(jalur: list[Path]) -> np.ndarray | None:
+    """Suhu kecerahan kelvin di kisi lintang bujur, NaN di luar jangkauan."""
     if not jalur:
-        return None, None
+        return None
     h0 = hsd.baca(str(jalur[0]))
     kol, bar, sah, bentuk, redam = _kisi(h0)
     hasil = np.full(bentuk, np.nan, np.float32)
@@ -188,133 +240,32 @@ def suhu_kisi(jalur: list[Path]):
         pilih = sah & (bar >= b0) & (bar < b0 + h["baris"])
         if pilih.any():
             hasil[pilih] = tb[bar[pilih] - b0, kol[pilih]]
-    hasil[(hasil < 170) | (hasil > 400)] = np.nan
+    # suhu di luar nalar dibuang, bukan dipaksa masuk skala
+    hasil[(hasil < 170) | (hasil > 340)] = np.nan
     return hasil, redam
 
 
-def _regang(a, lo, hi, gamma=1.0):
-    v = np.clip((a - lo) / (hi - lo), 0, 1)
-    return v ** (1.0 / gamma) if gamma != 1.0 else v
+def warnai(celsius: np.ndarray) -> np.ndarray:
+    henti = np.array([s[0] for s in SKALA], float)
+    warna = np.array([s[1] for s in SKALA], float)
+    out = np.zeros(celsius.shape + (4,), np.float32)
+    for c in range(4):
+        out[..., c] = np.interp(celsius, henti, warna[:, c])
+    out[~np.isfinite(celsius)] = 0
+    return out.round().astype(np.uint8)
 
 
-def _zenit_matahari(waktu: dt.datetime):
-    """Sudut zenit matahari di tiap sel kisi, derajat.
-
-    Rumus deklinasi dan sudut jam yang biasa. Ketelitiannya cukup, yang
-    diperlukan cuma membedakan siang dari malam."""
-    hari = waktu.timetuple().tm_yday
-    dekl = np.radians(23.44) * np.sin(2 * np.pi * (284 + hari) / 365.0)
-    lon = np.arange(LON0, LON1 + DERAJAT / 2, DERAJAT)
-    lat = np.arange(LAT1, LAT0 - DERAJAT / 2, -DERAJAT)
-    LON, LAT = np.meshgrid(lon, lat)
-    jam = waktu.hour + waktu.minute / 60.0
-    sudut_jam = np.radians(15.0 * (jam + LON / 15.0 - 12.0))
-    kos = (np.sin(np.radians(LAT)) * np.sin(dekl)
-           + np.cos(np.radians(LAT)) * np.cos(dekl) * np.cos(sudut_jam))
-    return np.degrees(np.arccos(np.clip(kos, -1, 1))).astype(np.float32)
-
-
-def _kotak_rata(a, r):
-    """Rata rata kotak (2r+1) lewat gambar jumlah, numpy saja.
-
-    Dipakai menghitung latar sekitar untuk uji titik panas. Sengaja tidak
-    memakai scipy supaya daftar pustaka di GitAction tetap dua baris."""
-    b = np.where(np.isfinite(a), a, 0.0).astype(np.float64)
-    m = np.isfinite(a).astype(np.float64)
-    def jml(x):
-        c = np.cumsum(np.cumsum(x, axis=0), axis=1)
-        c = np.pad(c, ((1, 0), (1, 0)))
-        H, W = x.shape
-        y0 = np.clip(np.arange(H) - r, 0, H); y1 = np.clip(np.arange(H) + r + 1, 0, H)
-        x0 = np.clip(np.arange(W) - r, 0, W); x1 = np.clip(np.arange(W) + r + 1, 0, W)
-        return (c[np.ix_(y1, x1)] - c[np.ix_(y0, x1)]
-                - c[np.ix_(y1, x0)] + c[np.ix_(y0, x0)])
-    n = jml(m)
-    return np.where(n > 0, jml(b) / np.maximum(n, 1), np.nan)
-
-
-def gambar_asap(b11, b13, b15, redam, tujuan: Path) -> None:
-    """RGB debu dan asap, resep baku pengindraan geostasioner.
-
-    Merah selisih 12,4 dikurangi 10,4. Hijau selisih 10,4 dikurangi 8,6.
-    Biru suhu 10,4 itu sendiri.
-
-    ALFANYA BUKAN DARI KECERAHAN, melainkan dari CIRI AEROSOLNYA. Versi
-    pertama memakai kekuatan warna begitu saja dan hasilnya seluruh peta
-    tertutup biru pekat, sebab laut hangat yang bersih pun punya warna di
-    resep ini. Untuk lapisan yang ditumpangkan di atas peta, yang harus
-    kelihatan cuma yang memang berisyarat.
-
-    Cirinya dua dan harus dua duanya. Selisih 12,4 dikurangi 10,4 yang
-    POSITIF, itu tanda butiran aerosol, dan suhu 10,4 yang masih HANGAT,
-    supaya awan tinggi yang tebal tidak ikut terwarnai."""
-    r = _regang(b15 - b13, -4.0, 2.0)
-    g = _regang(b13 - b11, 0.0, 15.0, gamma=2.5)
-    b = _regang(b13, 261.0, 289.0)
-    # Ambangnya dilonggarkan sesudah versi pertama terlalu ketat dan
-    # petanya nyaris kosong seluruhnya. Yang dicari isyarat sedang pun
-    # ikut terlihat, tapi langit bersih tetap bening.
-    ciri_aerosol = np.clip((b15 - b13 + 0.9) / 1.6, 0, 1)
-    bukan_awan = np.clip((b13 - 264.0) / 12.0, 0, 1)
-    kuat = np.clip(ciri_aerosol * bukan_awan * 1.4, 0, 1)
-    rgba = np.zeros(b13.shape + (4,), np.float32)
-    rgba[..., 0] = r * 255
-    rgba[..., 1] = g * 255
-    rgba[..., 2] = b * 255
-    rgba[..., 3] = kuat * 225 * redam
-    rgba[~np.isfinite(b13)] = 0
-    Image.fromarray(rgba.round().astype(np.uint8), "RGBA").save(
-        tujuan, "WEBP", quality=80, method=4, alpha_quality=100)
-
-
-def gambar_api(b07, b13, redam, tujuan: Path, waktu: dt.datetime | None = None) -> int:
-    """Titik panas, uji BERLATAR, bukan ambang mutlak saja.
-
-    Versi pertama cuma memakai ambang mutlak dan hasilnya gurun Australia
-    tengah hari penuh titik palsu. Permukaan kering yang kepanasan memang
-    bisa melewati ambang 3,9 mikrometer mana pun yang masuk akal.
-
-    Yang membedakan api dari tanah panas itu KONTRASNYA TERHADAP SEKITAR.
-    Api itu sumber kecil yang jauh lebih panas daripada tetangganya,
-    sedangkan gurun panas itu hangat merata berkilo kilometer. Jadi tiap
-    piksel diadu dengan rata rata latar di sekitarnya, dan yang lolos cuma
-    yang menonjol di dua duanya, suhu 3,9 um dan selisih 3,9 dikurangi
-    10,4.
-
-    Hasilnya tetap INDIKATIF. Ini bukan produk kebakaran resmi, ambangnya
-    kami tetapkan sendiri, dan itu disebut di keterangan layernya."""
-    selisih = b07 - b13
-    latar_b07 = _kotak_rata(b07, 12)
-    latar_sel = _kotak_rata(selisih, 12)
-    menonjol = ((b07 - latar_b07) >= 8.0) & ((selisih - latar_sel) >= 6.0)
-    if waktu is not None:
-        siang = _zenit_matahari(waktu) < 85.0
-        ambang = np.where(siang, API_BT39_SIANG, API_BT39_MALAM)
-    else:
-        ambang = API_BT39_SIANG
-    masuk_akal = np.isfinite(selisih) & (b07 >= ambang) & (selisih >= API_SELISIH_MIN)
-    panas = masuk_akal & menonjol
-    # Yang sangat panas DAN sangat menonjol ditandai lebih kuat.
-    kuat = panas & (selisih >= API_SELISIH_KUAT) & ((b07 - latar_b07) >= 15.0)
-    rgba = np.zeros(b13.shape + (4,), np.uint8)
-
-    def tebalkan(m, r):
-        out = m.copy()
-        for dy in range(-r, r + 1):
-            for dx in range(-r, r + 1):
-                if dx * dx + dy * dy > r * r:
-                    continue
-                out |= np.roll(np.roll(m, dy, axis=0), dx, axis=1)
-        return out
-
-    # Satu piksel satelit itu satu piksel kisi, dan di peta se-Indonesia
-    # titik sebesar itu tidak akan terlihat. Digemukkan jadi cakram kecil.
-    rgba[tebalkan(panas & ~kuat, 2)] = (0xF5, 0xA9, 0x1E, 225)
-    rgba[tebalkan(kuat, 3)] = (0xE4, 0x23, 0x20, 240)
-    Image.fromarray(rgba, "RGBA").save(tujuan, "WEBP", quality=90, method=4, alpha_quality=100)
-    return int(panas.sum())
+def simpan(kelvin: np.ndarray, tujuan: Path, redam: np.ndarray | None = None) -> None:
+    rgba = warnai(kelvin - 273.15)
+    if redam is not None:
+        rgba[..., 3] = (rgba[..., 3] * redam).round().astype(np.uint8)
+    img = Image.fromarray(rgba, "RGBA")
+    img.save(tujuan, "WEBP", quality=78, method=4, alpha_quality=100)
 
 
 def image_bounds() -> list:
+    """Kotak TEPI gambar, bukan pusat sel. Leaflet menarik tepi gambar ke
+    kotak yang diberikan, jadi memberi pusat sel menggeser seluruh medan
+    setengah sel. Jebakan yang sama sudah pernah kena di GFS."""
     s = DERAJAT / 2.0
     return [LON0 - s, LAT0 - s, LON1 + s, LAT1 + s]
