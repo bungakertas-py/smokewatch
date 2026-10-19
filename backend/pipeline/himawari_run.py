@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import numpy as np
 
 from backend.pipeline import himawari as H
+from backend.pipeline import himawari_tampak as T
 
 AKAR = Path(__file__).resolve().parents[1]
 KELUARAN = Path(sys.argv[1]) if len(sys.argv) > 1 else AKAR / "data" / "output" / "himawari"
@@ -84,19 +85,50 @@ def main() -> int:
               % (terisi, f_asap.stat().st_size / 1024, n_api, f_api.stat().st_size / 1024))
         jadi.append(w)
 
+    # ---- CITRA WARNA ASLI, gelung dan unduhan sendiri ----
+    # Dipisah sebab kanal tampak 535 MB per slot lawan 25 MB punya
+    # inframerah. Kalau unduhannya putus, yang hilang cukup gambarnya saja,
+    # Dust RGB dan titik panasnya sudah terbit duluan.
+    tampak_jadi = []
+    for w in sorted(pakai):
+        ft = KELUARAN / nama(T.LAYER, w)
+        if ft.exists() and ft.stat().st_size > 1000 and not gambar_ulang:
+            tampak_jadi.append(w)
+            continue
+        folder = SEMENTARA / ("tampak_" + w.strftime("%Y%m%d_%H%M"))
+        try:
+            alb, redam = {}, None
+            for band in sorted(T.KANAL):
+                jalur = T.unduh(w, band, folder)
+                a, rd = T.kisi(jalur)
+                if a is None:
+                    raise RuntimeError("kanal %d kosong" % band)
+                alb[band] = a
+                redam = rd
+            siang = T.gambar(alb, redam, w, ft)
+            print("  citra tampak %s, siang %.0f%% domain, %.0f KB"
+                  % (w.strftime("%H:%M"), siang, ft.stat().st_size / 1024))
+            tampak_jadi.append(w)
+        except Exception as e:
+            print("  citra tampak %s gagal, %s" % (w.strftime("%H:%M"), e))
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+
     if not jadi:
         print("tidak ada bingkai yang jadi, katalog tidak disentuh")
         return 0
 
-    sah = {nama(l, w) for w in jadi for l in (H.LAYER_ASAP, H.LAYER_API)}
+    sah = ({nama(l, w) for w in jadi for l in (H.LAYER_ASAP, H.LAYER_API)}
+           | {nama(T.LAYER, w) for w in tampak_jadi})
     for f in KELUARAN.glob("*_preview.webp"):
         if f.name not in sah:
             f.unlink()
             print("  buang bingkai lama", f.name)
 
-    def bingkai(layer):
+    def bingkai(layer, daftar=None):
         return [{"valid_time": w.strftime("%Y-%m-%dT%H:%M:00Z"),
-                 "preview_image": nama(layer, w)} for w in sorted(jadi)]
+                 "preview_image": nama(layer, w)}
+                for w in sorted(jadi if daftar is None else daftar)]
 
     data = {
         "generated_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -115,6 +147,9 @@ def main() -> int:
                           "frames": bingkai(H.LAYER_API)},
         },
     }
+    if tampak_jadi:
+        data["layers"][T.LAYER] = {"kind": "scalar", "level": "surface", "units": "",
+                                   "frames": bingkai(T.LAYER, tampak_jadi)}
     (KELUARAN / "catalog.json").write_text(json.dumps(data, indent=1), "utf-8")
     print("katalog diperbarui, %d bingkai" % len(jadi))
     return 0

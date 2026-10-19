@@ -161,7 +161,13 @@ def _kisi(h: dict):
     y = np.degrees(np.arcsin(np.clip(-r3 / rn, -1, 1)))
     kol = np.rint(h["coff"] + x * (2.0 ** -16) * h["cfac"]).astype(np.int32)
     bar = np.rint(h["loff"] + y * (2.0 ** -16) * h["lfac"]).astype(np.int32)
-    sah = tampak & (kol >= 0) & (kol < h["kolom"]) & (bar >= 0) & (bar < 5500)
+    # Batas barisnya DARI HEADER, bukan angka mati. Piringan itu bujur
+    # sangkar, jadi jumlah barisnya sama dengan jumlah kolomnya. Dulu di
+    # sini tertulis 5500, benar untuk kanal inframerah 2 km, tapi kanal
+    # tampak punya 11000 baris di 1 km dan 22000 di 0,5 km, dan angka mati
+    # itu memotong separuh sampai tiga perempat piringannya. Ketahuan waktu
+    # kanal tampak pertama kali digrid, isinya cuma 50 dan 9 persen.
+    sah = tampak & (kol >= 0) & (kol < h["kolom"]) & (bar >= 0) & (bar < h["kolom"])
     redam = np.clip((ZEN_PUDAR_AKHIR - zen) / (ZEN_PUDAR_AKHIR - ZEN_PUDAR_MULAI),
                     REDAM_MIN, 1.0).astype(np.float32)
     _peta[kunci] = (kol, bar, sah, LON.shape, redam)

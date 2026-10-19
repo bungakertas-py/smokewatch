@@ -76,3 +76,22 @@ def suhu_kecerahan(h):
     tb = h["c0"] + h["c1"] * te + h["c2"] * te * te
     tb[buruk] = np.nan
     return tb
+
+
+def albedo(h):
+    """Hitungan jadi ALBEDO, untuk kanal tampak dan dekat inframerah.
+
+    Blok 5 berisi dua susunan yang berbeda tergantung jenis kanalnya. Untuk
+    kanal inframerah, sesudah gain dan offset ada c0, c1, c2 yang dipakai
+    membetulkan suhu Planck. Untuk kanal tampak, di tempat yang sama persis
+    ada SATU angka saja, koefisien pengubah radiansi jadi albedo. Jadi yang
+    di sini terbaca sebagai `c0` memang koefisien itu, bukan c0 apa pun.
+
+    Sudah diperiksa ke berkasnya, kanal 3 jam 00:00 UTC 19 Oktober 2026
+    memulangkan albedo 0 sampai 1,14 dengan tengah 0,074, dan tidak ada satu
+    piksel pun yang jatuh di luar nalar."""
+    c = h["hitungan"].astype(np.float32)
+    buruk = (c == h["cnt_error"]) | (c == h["cnt_luar"])
+    a = (h["c0"] * (h["gain"] * c + h["offset"])).astype(np.float32)
+    a[buruk] = np.nan
+    return a
