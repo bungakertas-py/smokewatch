@@ -84,7 +84,8 @@ SEGMEN = range(2, 10)
 #   3  layer angin gerak awan ditambahkan
 #   4  gerak awan tidak lagi dari produk AMV NOAA, dijejak sendiri dari
 #      dua citra berurutan, jadi domainnya penuh sampai 62 BT
-VERSI_RENDER = 4
+#   5  skala puncak awan jadi inferno sepuluh tingkat, -70 sampai -10
+VERSI_RENDER = 5
 
 # IRAMA HARIAN, satu bingkai per hari di jam yang sama, lima hari ke
 # belakang. Diputuskan pemilik 19 Oktober 2026, menggantikan irama 30 menit
@@ -118,23 +119,39 @@ JEDA_GERAK_MENIT = 30
 
 LAYER = "cloudtop_temp"
 
-# Skala derajat Celsius. Yang hangat BENING supaya peta di bawahnya tembus,
-# sebab di situ memang tidak ada awan tinggi. Warnanya mulai berubah di
-# minus 40, dan itu bukan selera, minus 40 ambang yang biasa dipakai untuk
-# menandai konveksi dalam.
+# Skala derajat Celsius, INFERNO, sepuluh tingkat berjarak 6 derajat dari
+# -70 sampai -16, lalu bening di -10.
+#
+# Diminta pemilik 19 Oktober 2026. Versi lama memakai abu dan kelabu di -32
+# sampai 0, sehingga sebagian besar awan terbaca kelabu rata dan yang
+# berwarna cuma inti yang paling dingin.
+#
+# RENTANGNYA DIPILIH DARI DATA, bukan ditebak. Percobaan pertama -90 sampai
+# -70, dan itu diukur dulu pada tiga hari, 15, 17, dan 19 Oktober. Hasilnya
+# TIDAK ADA SATU PUN piksel yang lebih dingin dari -90, dan yang lebih
+# dingin dari -80 cuma 0,03 persen di hari terbaik. Delapan dari sepuluh
+# tingkatnya tidak akan pernah terpakai, dan yang tampil cuma belasan bintik
+# kuning di peta kosong, 0,08 persen domain. Pemilik mengoreksi sendiri
+# sesudah melihat angkanya, batas dinginnya jadi -70.
+#
+# Dengan -70 sampai -10 yang berwarna 11 sampai 14 persen domain, dan
+# seluruh tangga inferno terpakai tiap hari. Paling dingin ungu tua, naik
+# lewat magenta dan merah ke oranye dan kuning, lalu memudar ke bening
+# antara -16 dan -10 sehingga tepinya halus, bukan terpotong.
+#
 # ANGKA DI SINI WAJIB SAMA dengan legenda cloudtop_temp di app.js.
 SKALA = [
-    (-90, (0x2e, 0x1c, 0x7d, 250)),
-    (-80, (0x75, 0x24, 0x8a, 248)),
-    (-70, (0xc2, 0x41, 0x5c, 245)),
-    (-60, (0xe0, 0x5a, 0x41, 240)),
-    (-50, (0xfc, 0xac, 0x1c, 235)),
-    (-40, (0xf9, 0xdc, 0x5c, 225)),
-    (-32, (0x5a, 0x6e, 0x82, 205)),
-    (-20, (0x96, 0xa5, 0xb4, 170)),
-    (0,   (0xc8, 0xd2, 0xdc, 110)),
-    (10,  (0xe6, 0xeb, 0xf0, 40)),
-    (20,  (0xff, 0xff, 0xff, 0)),
+    (-70, (0x36, 0x09, 0x61, 252)),
+    (-64, (0x55, 0x0f, 0x69, 249)),
+    (-58, (0x73, 0x19, 0x6e, 246)),
+    (-52, (0x91, 0x26, 0x68, 243)),
+    (-46, (0xae, 0x36, 0x5c, 240)),
+    (-40, (0xcb, 0x48, 0x4b, 237)),
+    (-34, (0xe2, 0x62, 0x33, 234)),
+    (-28, (0xf4, 0x81, 0x16, 231)),
+    (-22, (0xfb, 0xaa, 0x12, 228)),
+    (-16, (0xfc, 0xcd, 0x3e, 225)),
+    (-10, (0xfc, 0xe7, 0x9a, 0)),
 ]
 
 
