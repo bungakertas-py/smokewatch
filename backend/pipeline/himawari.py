@@ -85,7 +85,8 @@ SEGMEN = range(2, 10)
 #   4  gerak awan tidak lagi dari produk AMV NOAA, dijejak sendiri dari
 #      dua citra berurutan, jadi domainnya penuh sampai 62 BT
 #   5  skala puncak awan jadi inferno sepuluh tingkat, -70 sampai -10
-VERSI_RENDER = 5
+#   6  batas hangatnya naik ke -5, jadi sebelas tingkat
+VERSI_RENDER = 6
 
 # IRAMA HARIAN, satu bingkai per hari di jam yang sama, lima hari ke
 # belakang. Diputuskan pemilik 19 Oktober 2026, menggantikan irama 30 menit
@@ -119,8 +120,8 @@ JEDA_GERAK_MENIT = 30
 
 LAYER = "cloudtop_temp"
 
-# Skala derajat Celsius, INFERNO, sepuluh tingkat berjarak 6 derajat dari
-# -70 sampai -16, lalu bening di -10.
+# Skala derajat Celsius, INFERNO, sebelas tingkat berjarak 6 derajat dari
+# -70 sampai -10, lalu bening di -5.
 #
 # Diminta pemilik 19 Oktober 2026. Versi lama memakai abu dan kelabu di -32
 # sampai 0, sehingga sebagian besar awan terbaca kelabu rata dan yang
@@ -134,10 +135,11 @@ LAYER = "cloudtop_temp"
 # kuning di peta kosong, 0,08 persen domain. Pemilik mengoreksi sendiri
 # sesudah melihat angkanya, batas dinginnya jadi -70.
 #
-# Dengan -70 sampai -10 yang berwarna 11 sampai 14 persen domain, dan
-# seluruh tangga inferno terpakai tiap hari. Paling dingin ungu tua, naik
-# lewat magenta dan merah ke oranye dan kuning, lalu memudar ke bening
-# antara -16 dan -10 sehingga tepinya halus, bukan terpotong.
+# Batas hangatnya dinaikkan ke -5 pada 19 Okt sore, dari -10, supaya awan
+# menengah yang hangat ikut terlihat. Berwarna 16,6 persen domain, naik
+# dari 14,1 persen. Paling dingin ungu tua, naik lewat magenta dan merah
+# ke oranye dan kuning, lalu memudar ke bening antara -10 dan -5 sehingga
+# tepinya halus, bukan terpotong.
 #
 # ANGKA DI SINI WAJIB SAMA dengan legenda cloudtop_temp di app.js.
 SKALA = [
@@ -151,7 +153,8 @@ SKALA = [
     (-28, (0xf4, 0x81, 0x16, 231)),
     (-22, (0xfb, 0xaa, 0x12, 228)),
     (-16, (0xfc, 0xcd, 0x3e, 225)),
-    (-10, (0xfc, 0xe7, 0x9a, 0)),
+    (-10, (0xfb, 0xe1, 0x7a, 222)),
+    (-5, (0xfd, 0xf0, 0xb8, 0)),
 ]
 
 
