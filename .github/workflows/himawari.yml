@@ -15,10 +15,15 @@ name: himawari-smokewatch
 # CAMS, sebab GitHub Pages mengganti seluruh situs tiap kali diterbitkan.
 on:
   schedule:
-    # Tiap setengah jam, sama dengan Atmosight. Dulu sejam, sebab tiap
-    # bingkai butuh empat kanal inframerah. Sekarang yang inframerah cuma
-    # kanal 13, jadi bobotnya sudah sama.
-    - cron: "*/30 * * * *"
+    # SEHARI SEKALI isinya, tapi dicoba BEBERAPA KALI. Bingkai yang dicari
+    # cuma satu, slot 04:00 UTC hari ini, dan sesudah dia masuk semua
+    # percobaan berikutnya berhenti cepat sebab berkasnya sudah ada di
+    # cache dan tidak ada yang diterbitkan ulang.
+    #
+    # Dicoba berkali kali sebab jadwal GitHub Actions sering telat, kadang
+    # tiga sampai lima jam waktu pelayanannya sibuk. Dengan satu jadwal
+    # saja, satu hari yang telat berarti satu hari yang hilang.
+    - cron: "15 5,7,9,12,16,21 * * *"
   workflow_dispatch:
 
 permissions:

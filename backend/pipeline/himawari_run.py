@@ -67,80 +67,86 @@ def main() -> int:
     if gambar_ulang:
         print("cap versi gambar berubah, %d jadi %d, semua bingkai digambar ulang"
               % (versi_lama(), H.VERSI_RENDER))
-    slot = H.slot_tersedia()
-    if not slot:
-        print("tidak ada slot yang terdaftar di ember, berhenti tanpa mengubah apa apa")
+    urut = sorted(H.slot_harian())
+    if not urut:
+        print("tidak ada slot patokan yang terdaftar di ember, berhenti tanpa mengubah apa apa")
         return 0
-    pakai = H.pilih_bingkai(slot)
-    print("slot terbaru di ember:", slot[0].strftime("%Y-%m-%d %H:%M"), "UTC")
-    print("bingkai yang dipakai :", ", ".join(w.strftime("%H:%M") for w in pakai))
+    print("patokan harian  : %02d:%02d UTC, %d hari"
+          % (H.JAM_PATOKAN, H.MENIT_PATOKAN, H.JUM_HARI))
+    print("bingkai dipakai : " + ", ".join(w.strftime("%d %b") for w in urut))
 
     import numpy as np
 
-    urut = sorted(pakai)
-    # Gerak awan dijejak dari DUA citra berurutan, jadi satu slot kadang
-    # perlu dibangun kisinya walau gambarnya sudah tersimpan. Yang perlu itu
-    # slot yang medannya sendiri belum ada, dan slot SEBELUM slot semacam
-    # itu. Biasanya cuma satu dua, sebab tiap jalan paling cuma ada satu
-    # bingkai baru.
-    perlu_kisi = set()
-    for i in range(1, len(urut)):
-        f = KELUARAN / nama_angin(urut[i])
-        if gambar_ulang or not f.exists() or f.stat().st_size < 1000:
-            perlu_kisi.add(urut[i - 1])
-            perlu_kisi.add(urut[i])
+    def kisi_slot(w, sebab):
+        """Unduh satu slot, kembalikan kisi suhu dan redamannya."""
+        print("  %s mengunduh %d segmen, %s"
+              % (w.strftime("%d %b %H:%M"), len(H.SEGMEN), sebab))
+        folder = SEMENTARA / w.strftime("%Y%m%d_%H%M")
+        try:
+            hasil = H.bingkai(H.unduh(w, folder))
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+        return hasil if hasil else (None, None)
 
     bingkai_jadi = []
     angin_jadi = []
-    lalu_w, lalu_arr = None, None      # kisi slot sebelumnya, cuma SATU yang ditahan
-    for idx, w in enumerate(urut):
+    for w in urut:
+        tag = w.strftime("%d %b")
         berkas = KELUARAN / nama_bingkai(w)
         sudah = berkas.exists() and berkas.stat().st_size > 1000 and not gambar_ulang
-        arr = None
-        if sudah and w not in perlu_kisi:
-            print("  %s sudah ada, dilewati" % w.strftime("%H:%M"))
-            bingkai_jadi.append(w)
-        else:
-            sebab = "gambarnya belum ada" if not sudah else "kisinya dipakai menjejak gerak"
-            print("  %s mengunduh %d segmen, %s" % (w.strftime("%H:%M"), len(H.SEGMEN), sebab))
-            folder = SEMENTARA / w.strftime("%Y%m%d_%H%M")
-            jalur = H.unduh(w, folder)
-            hasil = H.bingkai(jalur)
-            arr, redam = hasil if hasil else (None, None)
-            shutil.rmtree(folder, ignore_errors=True)
-            if arr is None:
-                print("    gagal, dilewati")
-                lalu_w, lalu_arr = None, None
-                continue
-            terisi = float(100.0 * np.isfinite(arr).mean())
-            if terisi < 40:
-                print("    cuma %.0f persen terisi, dibuang sebagai cacat" % terisi)
-                lalu_w, lalu_arr = None, None
-                continue
-            if not sudah:
-                H.simpan(arr, berkas, redam)
-                print("    jadi, %.0f persen terisi, %.0f KB"
-                      % (terisi, berkas.stat().st_size / 1024))
-            bingkai_jadi.append(w)
-
-        # ---- GERAK AWAN, dijejak dari pasangan slot ini dan sebelumnya ----
-        # Medannya dicap dengan jam slot BELAKANGAN, sebab artinya "gerak
-        # awan sampai jam ini". Dengan begitu bingkai terbaru selalu punya
-        # angin, dan yang tidak punya justru bingkai paling tua.
         fa = KELUARAN / nama_angin(w)
-        if fa.exists() and fa.stat().st_size > 1000 and not gambar_ulang:
+        perlu_angin = gambar_ulang or not fa.exists() or fa.stat().st_size < 1000
+
+        arr = None
+        if sudah and not perlu_angin:
+            print("  %s sudah ada, dilewati" % tag)
+            bingkai_jadi.append(w)
             angin_jadi.append(w)
-        elif lalu_arr is not None and lalu_w is not None and arr is not None:
-            detik = (w - lalu_w).total_seconds()
-            try:
-                U, V, BT = G.medan(lalu_arr, arr, detik)
-                n = G.gambar(U, V, BT, fa)
-                print("    gerak awan %s, %d panah, %.0f KB"
-                      % (w.strftime("%H:%M"), n, fa.stat().st_size / 1024))
-                angin_jadi.append(w)
-            except Exception as e:
-                print("    gerak awan %s gagal, %s" % (w.strftime("%H:%M"), e))
-        lalu_w, lalu_arr = w, arr
+            continue
+
+        sebab = "gambarnya belum ada" if not sudah else "kisinya dipakai menjejak gerak"
+        arr, redam = kisi_slot(w, sebab)
+        terisi = float(100.0 * np.isfinite(arr).mean()) if arr is not None else 0.0
+        if arr is None or terisi < 40:
+            print("    gagal atau cacat, terisi %.0f persen" % terisi)
+            # GAMBAR LAMA TETAP DIAKUI SAH. Slot ini kadang diunduh ulang
+            # cuma untuk menjejak gerak, padahal gambarnya sudah tersimpan.
+            # Kalau unduhan ulang itu gagal lalu harinya ikut dicoret, nama
+            # berkasnya hilang dari daftar sah dan pembersih di bawah
+            # MENGHAPUS gambar yang sebenarnya masih baik.
+            if sudah:
+                bingkai_jadi.append(w)
+            continue
+        if not sudah:
+            H.simpan(arr, berkas, redam)
+            print("    jadi, %.0f persen terisi, %.0f KB"
+                  % (terisi, berkas.stat().st_size / 1024))
+        bingkai_jadi.append(w)
+        if not perlu_angin:
+            angin_jadi.append(w)
+            continue
+
+        # ---- GERAK AWAN, dijejak dari pasangan BERJARAK 30 MENIT ----
+        # Pasangannya slot setengah jam SEBELUM patokan, bukan hari
+        # sebelumnya. Dalam sehari awannya sudah berganti seluruhnya, jadi
+        # menjejak antar hari tidak berarti apa apa.
+        #
+        # Medannya dicap jam patokan, sebab artinya "gerak awan sampai jam
+        # ini", dan dengan begitu dia sejajar waktu dengan citra puncak
+        # awan yang jadi alasnya di peta.
+        lalu_w = w - dt.timedelta(minutes=H.JEDA_GERAK_MENIT)
+        lalu_arr, _ = kisi_slot(lalu_w, "pasangan untuk menjejak gerak")
+        if lalu_arr is None:
+            print("    pasangan gerak tidak ada, %s tanpa panah" % tag)
+            continue
+        try:
+            U, V, BT = G.medan(lalu_arr, arr, H.JEDA_GERAK_MENIT * 60.0)
+            n = G.gambar(U, V, BT, fa)
+            print("    gerak awan %s, %d panah, %.0f KB"
+                  % (tag, n, fa.stat().st_size / 1024))
+            angin_jadi.append(w)
+        except Exception as e:
+            print("    gerak awan %s gagal, %s" % (tag, e))
 
     # ---- CITRA WARNA ASLI, gelung dan unduhan sendiri ----
     # Sengaja dipisah dari gelung di atas. Kanal tampak itu 535 MB per slot
@@ -165,10 +171,10 @@ def main() -> int:
                 redam = rd
             siang = T.gambar(alb, redam, w, ft)
             print("  citra tampak %s, siang %.0f%% domain, %.0f KB"
-                  % (w.strftime("%H:%M"), siang, ft.stat().st_size / 1024))
+                  % (w.strftime("%d %b"), siang, ft.stat().st_size / 1024))
             tampak_jadi.append(w)
         except Exception as e:
-            print("  citra tampak %s gagal, %s" % (w.strftime("%H:%M"), e))
+            print("  citra tampak %s gagal, %s" % (w.strftime("%d %b"), e))
         finally:
             shutil.rmtree(folder, ignore_errors=True)
 
@@ -190,7 +196,7 @@ def main() -> int:
     kat = KELUARAN / "catalog.json"
     data = {
         "generated_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "model": "himawari9_ahi_b13",
+        "model": "himawari9_ahi",
         "model_label": "Satelit Himawari-9",
         "versi_render": H.VERSI_RENDER,
         # Satelit tidak punya jam inisiasi, jadi yang dipakai jam PENGAMATAN

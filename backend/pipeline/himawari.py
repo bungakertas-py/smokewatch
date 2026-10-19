@@ -86,12 +86,36 @@ SEGMEN = range(2, 10)
 #      dua citra berurutan, jadi domainnya penuh sampai 62 BT
 VERSI_RENDER = 4
 
-LANGKAH_MENIT = 30
-# ENAM JAM ke belakang. Awalnya tiga jam, dan pemilik benar waktu bilang
-# sumbu waktunya terasa tidak punya masa lalu. Dua belas bingkai sudah cukup
-# untuk melihat awan tumbuh dan bergerak, dan karena yang baru tiap jalan
-# cuma satu, menambah riwayat itu murah sesudah jalan pertama.
-JUM_BINGKAI = 12
+# IRAMA HARIAN, satu bingkai per hari di jam yang sama, lima hari ke
+# belakang. Diputuskan pemilik 19 Oktober 2026, menggantikan irama 30 menit
+# sepanjang enam jam.
+#
+# KENAPA 04:00 UTC, yaitu 11:00 WIB. Ini dihitung, bukan dipilih sekenanya.
+# Di jam itu SELURUH domain kita kena matahari, dari 62 BT sampai 180 BT,
+# dan matahari paling tinggi di atas Indonesia, zenit rata rata 15,5
+# derajat. Sejam sebelumnya 99,9 persen domain, sejam sesudahnya 99,6
+# persen, dan di luar itu turun cepat, jam 09:00 WIB tinggal 92 persen dan
+# jam 16:00 WIB tinggal 53 persen. Jadi inilah satu satunya jam yang citra
+# warna aslinya terang penuh sedomain.
+#
+# Dua layer inframerah sebenarnya tidak peduli jam, mereka jalan siang dan
+# malam. Jamnya diikutkan supaya tiga layer sejajar waktu, sebab panah AMV
+# memang digambar di atas citra puncak awan pada jam yang sama.
+JAM_PATOKAN = 4
+MENIT_PATOKAN = 0
+JUM_HARI = 5
+
+# Gerak awan tetap dijejak dari pasangan berjarak 30 MENIT, bukan dari dua
+# hari berurutan. Dalam sehari awannya sudah berganti seluruhnya, jadi
+# menjejak antar hari tidak berarti apa apa.
+#
+# Jaraknya juga TIDAK BOLEH dirapatkan jadi 10 menit sekadar supaya hemat.
+# Di kisi yang sudah dikasarkan, satu piksel itu 11,1 km. Dalam 30 menit itu
+# 6,2 m/detik per piksel, dalam 10 menit jadi 18,5 m/detik per piksel, dan
+# pada kekasaran segitu hampir semua angin tropis jatuh di satu dua piksel
+# yang sama.
+JEDA_GERAK_MENIT = 30
+
 LAYER = "cloudtop_temp"
 
 # Skala derajat Celsius. Yang hangat BENING supaya peta di bawahnya tembus,
@@ -119,59 +143,49 @@ def _ambil(url: str, timeout: int = 180) -> bytes:
         return r.read()
 
 
-def slot_tersedia(batas: int = 300) -> list[dt.datetime]:
-    """Slot sepuluh menitan yang berkasnya sudah mendarat, terbaru dulu.
+def _slot_ada(w: dt.datetime) -> bool:
+    """Benar kalau slot sepuluh menitan ini sudah mendarat di ember.
 
-    BATASNYA LONGGAR, dan itu disengaja. Pemotongan terjadi SEBELUM
-    penyaringan irama, jadi batas yang ketat memangkas slot yang justru
-    dibutuhkan. Dengan batas 12 dan irama sejam, yang lolos cuma dua
-    bingkai dari enam yang diminta, sebab dua belas slot sepuluh menitan
-    itu cuma dua jam. Sudah kejadian di dua app sekaligus.
+    Ember didaftar, bukan ditebak dari jam dinding. Keterlambatan Himawari
+    biasanya setengah jam, tapi pernah lebih, dan menebak berarti separuh
+    unduhan jadi 404.
 
-    Ember didaftar per jam, bukan ditebak dari jam dinding. Keterlambatan
-    Himawari biasanya setengah jam, tapi pernah lebih, dan menebak berarti
-    separuh unduhan jadi 404."""
+    Awalannya berhenti di JAM dan TANPA garis miring. Kunci aslinya
+    menyatukan jam dan menit, ".../18/0400/...", jadi awalan ".../18/04/"
+    tidak pernah cocok dan daftarnya selalu kosong. Sudah kena dua kali,
+    sekali memotong teks, sekali menambah garis miring."""
+    pre = "AHI-L1b-FLDK/%s" % w.strftime("%Y/%m/%d/%H")
+    url = "%s/?list-type=2&prefix=%s&delimiter=/" % (EMBER, pre)
+    try:
+        xml = _ambil(url, 60).decode("utf-8", "replace")
+    except Exception as e:
+        print("  daftar ember gagal untuk %s, %s" % (pre, e))
+        return False
+    cari = "/%s/" % w.strftime("%H%M")
+    return any(p.endswith(cari) for p in re.findall(r"<Prefix>([^<]+)</Prefix>", xml))
+
+
+def slot_harian(batas: int = JUM_HARI) -> list[dt.datetime]:
+    """Slot patokan harian yang sudah mendarat, terbaru dulu.
+
+    Hari ini ikut CUMA kalau slotnya sudah ada. Kalau alur kerja jalan
+    sebelum 04:00 UTC, yang terbaru jadi kemarin, dan itu memang benar,
+    bukan kegagalan.
+
+    Dicari sampai dua hari lebih jauh daripada yang diminta, supaya satu
+    hari yang bolong di ember tidak memendekkan deretnya."""
     sekarang = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
     ada: list[dt.datetime] = []
-    # Tujuh jam ke belakang didaftar, cukup untuk mengisi dua belas bingkai
-    # setengah jaman walau beberapa slot bolong.
-    for mundur in range(7):
-        jam = (sekarang - dt.timedelta(hours=mundur)).replace(minute=0, second=0, microsecond=0)
-        # Awalannya sampai JAM saja, lalu pembatas garis miring, supaya
-        # ember memulangkan daftar slot sepuluh menitan sebagai awalan
-        # bersama. Sempat kutulis memotong teks jam menit dan hasilnya
-        # awalan yang tidak pernah ada, daftarnya selalu kosong.
-        # Awalannya berhenti di JAM dan TANPA garis miring. Kunci aslinya
-        # menyatukan jam dan menit, ".../18/0700/...", jadi awalan
-        # ".../18/07/" tidak pernah cocok dan daftarnya selalu kosong.
-        # Sudah kena dua kali, sekali memotong teks, sekali menambah
-        # garis miring.
-        pre = "AHI-L1b-FLDK/%s" % jam.strftime("%Y/%m/%d/%H")
-        url = "%s/?list-type=2&prefix=%s&delimiter=/" % (EMBER, pre)
-        try:
-            xml = _ambil(url, 60).decode("utf-8", "replace")
-        except Exception as e:
-            print("  daftar ember gagal untuk %s, %s" % (pre, e))
+    for mundur in range(batas + 2):
+        w = (sekarang - dt.timedelta(days=mundur)).replace(
+            hour=JAM_PATOKAN, minute=MENIT_PATOKAN, second=0, microsecond=0)
+        if w > sekarang:
             continue
-        for p in re.findall(r"<Prefix>([^<]+)</Prefix>", xml):
-            m = re.search(r"/(\d{4})/$", p)
-            if not m:
-                continue
-            ada.append(jam.replace(minute=int(m.group(1)[2:])))
-    ada = sorted(set(ada), reverse=True)
-    return ada[:batas]
-
-
-def pilih_bingkai(slot: list[dt.datetime]) -> list[dt.datetime]:
-    """Ambil satu slot tiap LANGKAH_MENIT, terbaru dulu."""
-    pakai: list[dt.datetime] = []
-    for s in slot:
-        if s.minute % LANGKAH_MENIT:
-            continue
-        pakai.append(s)
-        if len(pakai) >= JUM_BINGKAI:
+        if _slot_ada(w):
+            ada.append(w)
+        if len(ada) >= batas:
             break
-    return pakai
+    return ada
 
 
 def unduh(waktu: dt.datetime, folder: Path) -> list[Path]:
