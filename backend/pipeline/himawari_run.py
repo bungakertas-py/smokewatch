@@ -117,17 +117,26 @@ def main() -> int:
     # pernah selesai, dia cuma akan kena batas enam jam GitHub Actions lalu
     # mati di tengah dan mengulang dari awal di jalan berikutnya.
     #
-    # Terukur 21 Oktober 2026, memasak satu slot sekitar 1,6 menit termasuk
-    # mengunduh 19 MB segmen inframerah. Dua hari berarti 288 slot, yaitu
-    # 7,7 jam, lewat dari batas. Jadi tiap jalan mengerjakan paling banyak
-    # JATAH slot baru lalu berhenti, dan sisanya diambil jalan berikutnya.
-    # Yang sudah jadi tersimpan di cache keluaran, jadi kemajuannya menumpuk
-    # dan deretnya penuh sesudah beberapa jalan.
+    # Terukur dari jalan nyata 21 Oktober 2026, 18 bingkai selesai dalam
+    # 13,7 menit, yaitu 0,81 menit per slot. Dua hari berarti 288 slot,
+    # yaitu sekitar 3,9 jam, jadi SEBENARNYA MUAT dalam satu jalan.
+    #
+    # Angka 1,6 menit yang sempat dipakai di sini diukur SEBELUM simpanan
+    # kisi dipasang, waktu tiap slot masih mengunduh dua kali.
+    #
+    # Jatahnya tetap ada, dan bukan karena waktunya kurang. Cache keluaran
+    # baru disimpan SESUDAH masak selesai, jadi satu jalan yang gugur di
+    # jam keempat membuang seluruh kemajuannya. Dengan jatah, tiap jalan
+    # menyimpan apa yang sudah jadi, dan jalan berikutnya melanjutkan.
+    #
+    # 150 memberi dua jalan untuk mengisi dua hari penuh, masing masing
+    # sekitar dua jam, dengan margin lebar ke batas enam jam. Untuk mengisi
+    # sekali jalan, isi 288 di kotak isian workflow_dispatch.
     #
     # YANG TERBARU DIKERJAKAN DULU, sebab bingkai hari ini lebih berguna
     # daripada bingkai kemarin lusa. Gelungnya sendiri tetap urut maju
     # supaya pasangan penjejak gerak selalu sudah ada waktu dibutuhkan.
-    JATAH = int(os.environ.get("HIMAWARI_JATAH") or 60)
+    JATAH = int(os.environ.get("HIMAWARI_JATAH") or 150)
 
     def _kurang(nama):
         f = KELUARAN / nama

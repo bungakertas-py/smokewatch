@@ -19,8 +19,8 @@ on:
     # memang punya pekerjaan, bukan sekadar memeriksa lalu berhenti.
     #
     # Jarak terbesar antar jalan di jadwal ini delapan jam, yaitu 48 slot
-    # baru, dan jatah tiap jalan 60 slot. Jadi deretnya selalu terkejar.
-    # Kalau jadwalnya nanti dirapatkan, jatahnya boleh ikut diturunkan.
+    # baru, sedangkan jatah tiap jalan 150 slot. Jadi sesudah penuh,
+    # deretnya selalu terkejar dengan sisa ruang lebar.
     #
     # Dicoba berkali kali sebab jadwal GitHub Actions sering telat, kadang
     # tiga sampai lima jam waktu pelayanannya sibuk.
@@ -28,7 +28,7 @@ on:
   workflow_dispatch:
     inputs:
       jatah:
-        description: "Batas slot baru yang dimasak satu jalan, kosongkan untuk 60"
+        description: "Batas slot baru satu jalan. Kosongkan untuk 150, isi 288 untuk mengisi dua hari sekaligus"
         required: false
         default: ""
 
@@ -44,10 +44,10 @@ concurrency:
 jobs:
   masak:
     runs-on: ubuntu-latest
-    # Terukur 21 Oktober 2026, satu slot sekitar 1,6 menit termasuk
-    # mengunduh 19 MB segmen inframerah. Jatah 60 slot berarti sekitar 96
-    # menit, jadi 300 menit memberi ruang lebar tanpa menyentuh batas 360
-    # menit GitHub Actions.
+    # Terukur dari jalan nyata, satu slot 0,81 menit. Jatah 150 berarti
+    # sekitar dua jam, dan 288 slot sekaligus sekitar 3,9 jam. Batas 300
+    # menit memberi ruang untuk dua duanya tanpa menyentuh batas 360 menit
+    # GitHub Actions.
     timeout-minutes: 300
     outputs:
       berubah: ${{ steps.masak.outputs.berubah }}
