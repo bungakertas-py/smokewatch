@@ -15,16 +15,22 @@ name: himawari-smokewatch
 # CAMS, sebab GitHub Pages mengganti seluruh situs tiap kali diterbitkan.
 on:
   schedule:
-    # SEHARI SEKALI isinya, tapi dicoba BEBERAPA KALI. Bingkai yang dicari
-    # cuma satu, slot 04:00 UTC hari ini, dan sesudah dia masuk semua
-    # percobaan berikutnya berhenti cepat sebab berkasnya sudah ada di
-    # cache dan tidak ada yang diterbitkan ulang.
+    # ENAM KALI SEHARI, dan sejak irama jadi sepuluh menit tiap jalan
+    # memang punya pekerjaan, bukan sekadar memeriksa lalu berhenti.
+    #
+    # Jarak terbesar antar jalan di jadwal ini delapan jam, yaitu 48 slot
+    # baru, dan jatah tiap jalan 60 slot. Jadi deretnya selalu terkejar.
+    # Kalau jadwalnya nanti dirapatkan, jatahnya boleh ikut diturunkan.
     #
     # Dicoba berkali kali sebab jadwal GitHub Actions sering telat, kadang
-    # tiga sampai lima jam waktu pelayanannya sibuk. Dengan satu jadwal
-    # saja, satu hari yang telat berarti satu hari yang hilang.
+    # tiga sampai lima jam waktu pelayanannya sibuk.
     - cron: "15 5,7,9,12,16,21 * * *"
   workflow_dispatch:
+    inputs:
+      jatah:
+        description: "Batas slot baru yang dimasak satu jalan, kosongkan untuk 60"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -38,6 +44,11 @@ concurrency:
 jobs:
   masak:
     runs-on: ubuntu-latest
+    # Terukur 21 Oktober 2026, satu slot sekitar 1,6 menit termasuk
+    # mengunduh 19 MB segmen inframerah. Jatah 60 slot berarti sekitar 96
+    # menit, jadi 300 menit memberi ruang lebar tanpa menyentuh batas 360
+    # menit GitHub Actions.
+    timeout-minutes: 300
     outputs:
       berubah: ${{ steps.masak.outputs.berubah }}
     steps:
@@ -60,6 +71,8 @@ jobs:
 
       - name: Masak citra satelit
         id: masak
+        env:
+          HIMAWARI_JATAH: ${{ inputs.jatah }}
         run: |
           # Katalog CAMS duduk di AKAR keluaran, bukan di subfolder cams.
           # Penjagaan yang menunjuk subfolder tidak pernah terpenuhi walau

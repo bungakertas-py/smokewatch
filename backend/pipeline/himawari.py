@@ -90,24 +90,36 @@ SEGMEN = range(2, 10)
 #      tingkatnya dipangkas dari dua belas jadi TUJUH
 VERSI_RENDER = 7
 
-# IRAMA HARIAN, satu bingkai per hari di jam yang sama, lima hari ke
-# belakang. Diputuskan pemilik 19 Oktober 2026, menggantikan irama 30 menit
-# sepanjang enam jam.
+# IRAMA SEPULUH MENIT, DUA HARI KE BELAKANG. Diputuskan pemilik 21 Oktober
+# 2026, menggantikan irama satu bingkai per hari yang berlaku sejak 19
+# Oktober.
 #
-# KENAPA 04:00 UTC, yaitu 11:00 WIB. Ini dihitung, bukan dipilih sekenanya.
-# Di jam itu SELURUH domain kita kena matahari, dari 62 BT sampai 180 BT,
-# dan matahari paling tinggi di atas Indonesia, zenit rata rata 15,5
+# Sepuluh menit itu irama asli Himawari, bukan angka pilihan kita. AHI
+# memindai sepiringan bumi sekali tiap sepuluh menit, 144 kali sehari, dan
+# sudah diperiksa langsung ke ember: pada 20 Oktober 2026 ada 142 slot,
+# yang tidak ada cuma 02:40 dan 14:40 UTC sebab satelitnya membuang momentum
+# roda reaksi dan berhenti memindai bumi.
+#
+# DUA HARI, BUKAN TIGA, dan itu batas ukuran bukan selera. Satu slot
+# menghasilkan sekitar 0,9 MB untuk dua layer inframerah. Dua hari berarti
+# 288 slot, tiga hari 432, dan GitHub Pages punya batas lunak 1 GB untuk
+# SELURUH situs yang sudah berisi GFS dan ECMWF juga.
+JEDA_MENIT = 10
+JUM_HARI = 2
+
+# Jarak aman dari jam sekarang sebelum sebuah slot boleh diambil. Lihat
+# deret_slot() untuk angka ukurnya.
+LATENSI_AMAN_MENIT = 20
+
+# Jam patokan LAMA, dipertahankan CUMA untuk citra warna asli, lihat
+# slot_tampak(). Angkanya dihitung, bukan dipilih sekenanya: pada 04:00 UTC
+# atau 11:00 WIB, SELURUH domain kita kena matahari dari 62 sampai 180 BT,
+# dan matahari paling tinggi di atas Indonesia dengan zenit rata rata 15,5
 # derajat. Sejam sebelumnya 99,9 persen domain, sejam sesudahnya 99,6
-# persen, dan di luar itu turun cepat, jam 09:00 WIB tinggal 92 persen dan
-# jam 16:00 WIB tinggal 53 persen. Jadi inilah satu satunya jam yang citra
-# warna aslinya terang penuh sedomain.
-#
-# Dua layer inframerah sebenarnya tidak peduli jam, mereka jalan siang dan
-# malam. Jamnya diikutkan supaya tiga layer sejajar waktu, sebab panah AMV
-# memang digambar di atas citra puncak awan pada jam yang sama.
+# persen, lalu turun cepat, jam 09:00 WIB tinggal 92 persen dan jam 16:00
+# WIB tinggal 53 persen.
 JAM_PATOKAN = 4
 MENIT_PATOKAN = 0
-JUM_HARI = 5
 
 # Gerak awan tetap dijejak dari pasangan berjarak 30 MENIT, bukan dari dua
 # hari berurutan. Dalam sehari awannya sudah berganti seluruhnya, jadi
@@ -165,52 +177,91 @@ def _ambil(url: str, timeout: int = 180) -> bytes:
         return r.read()
 
 
-def _slot_ada(w: dt.datetime) -> bool:
-    """Benar kalau slot sepuluh menitan ini sudah mendarat di ember.
-
-    Ember didaftar, bukan ditebak dari jam dinding. Keterlambatan Himawari
-    biasanya setengah jam, tapi pernah lebih, dan menebak berarti separuh
-    unduhan jadi 404.
-
-    Awalannya berhenti di JAM dan TANPA garis miring. Kunci aslinya
-    menyatukan jam dan menit, ".../18/0400/...", jadi awalan ".../18/04/"
-    tidak pernah cocok dan daftarnya selalu kosong. Sudah kena dua kali,
-    sekali memotong teks, sekali menambah garis miring."""
-    pre = "AHI-L1b-FLDK/%s" % w.strftime("%Y/%m/%d/%H")
-    url = "%s/?list-type=2&prefix=%s&delimiter=/" % (EMBER, pre)
-    try:
-        xml = _ambil(url, 60).decode("utf-8", "replace")
-    except Exception as e:
-        print("  daftar ember gagal untuk %s, %s" % (pre, e))
-        return False
-    cari = "/%s/" % w.strftime("%H%M")
-    return any(p.endswith(cari) for p in re.findall(r"<Prefix>([^<]+)</Prefix>", xml))
+# _slot_ada() DIBUANG 21 Oktober 2026 bersama irama harian. Dia mendaftar
+# ember untuk memastikan satu slot sudah mendarat, dan itu masuk akal waktu
+# slotnya cuma lima sehari. Pada irama sepuluh menit daftarnya 288 slot, dan
+# mendaftarkan tiap satunya berarti 288 permintaan cuma untuk menyusun
+# rencana. Sekarang slot yang tidak ada gugur sendiri waktu unduhannya
+# dicoba, lihat unduh().
+#
+# SATU JEBAKAN DARI SANA DISIMPAN DI SINI, sebab dia akan menggigit lagi
+# kalau suatu saat ada yang mendaftar ember: awalannya berhenti di JAM dan
+# TANPA garis miring. Kunci aslinya menyatukan jam dan menit,
+# ".../18/0400/...", jadi awalan ".../18/04/" tidak pernah cocok dan
+# daftarnya selalu kosong. Sudah kena dua kali, sekali memotong teks, sekali
+# menambah garis miring.
 
 
-def slot_harian(batas: int = JUM_HARI) -> list[dt.datetime]:
-    """Slot patokan harian yang sudah mendarat, terbaru dulu.
+def _bulat_slot(w: dt.datetime) -> dt.datetime:
+    """Turunkan ke kelipatan JEDA_MENIT terdekat ke bawah."""
+    return w.replace(minute=w.minute - w.minute % JEDA_MENIT, second=0, microsecond=0)
 
-    Hari ini ikut CUMA kalau slotnya sudah ada. Kalau alur kerja jalan
-    sebelum 04:00 UTC, yang terbaru jadi kemarin, dan itu memang benar,
-    bukan kegagalan.
 
-    Dicari sampai dua hari lebih jauh daripada yang diminta, supaya satu
-    hari yang bolong di ember tidak memendekkan deretnya."""
+def deret_slot(hari: int = JUM_HARI) -> list[dt.datetime]:
+    """Semua slot sepuluh menitan dalam `hari` terakhir, TANPA menyentuh ember.
+
+    Dipisah dari pemeriksaan ketersediaan dengan sengaja. Daftarnya 288
+    slot untuk dua hari, dan mendaftarkan tiap satunya ke ember berarti 288
+    permintaan HTTP cuma untuk menyusun rencana. Yang dipakai gelung utama
+    cukup rencana ini, dan slot yang ternyata tidak ada akan gugur sendiri
+    waktu unduhannya dicoba.
+
+    Slot paling muda yang diikutkan adalah LIMA BELAS MENIT ke belakang,
+    bukan jam sekarang. Diukur 21 Oktober 2026, berkas pertama satu slot
+    mendarat di ember 10,7 menit sesudah jam pengamatan dan yang terakhir
+    14,1 menit. Jadi ada jendela sekitar tiga setengah menit ketika folder
+    slotnya sudah ada tapi SEBAGIAN SEGMENNYA BELUM. Slot yang diambil di
+    jendela itu menghasilkan citra berpita kosong tanpa galat apa pun,
+    sebab unduh() melewati segmen yang gagal."""
     sekarang = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
-    ada: list[dt.datetime] = []
-    for mundur in range(batas + 2):
+    muda = _bulat_slot(sekarang - dt.timedelta(minutes=LATENSI_AMAN_MENIT))
+    n = hari * 24 * 60 // JEDA_MENIT
+    return [muda - dt.timedelta(minutes=JEDA_MENIT * k) for k in range(n)]
+
+
+def slot_tampak(hari: int = JUM_HARI) -> list[dt.datetime]:
+    """Slot untuk citra warna asli, JAUH LEBIH JARANG daripada inframerah.
+
+    Ini bukan kompromi gaya, ini batas yang terukur. Satu slot kanal tampak
+    menuntut unduhan 588 MB, sebab kanal 3 sendiri 327 MB di resolusi 0,5
+    km, sedangkan satu slot inframerah cuma 19 MB. Pada irama sepuluh menit
+    selama dua hari itu 169 GB, dan runner GitHub tidak punya disk maupun
+    waktu sebanyak itu.
+
+    Lagi pula kanal tampak BUTUH MATAHARI. Di luar jam siang dia hitam,
+    jadi sebagian besar slot sepuluh menitan cuma akan jadi bingkai gelap
+    yang tidak memberi tahu apa apa.
+
+    Jadi satu bingkai per hari di JAM_PATOKAN, jam yang seluruh domainnya
+    terang penuh."""
+    sekarang = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
+    ada = []
+    for mundur in range(hari + 2):
         w = (sekarang - dt.timedelta(days=mundur)).replace(
             hour=JAM_PATOKAN, minute=MENIT_PATOKAN, second=0, microsecond=0)
-        if w > sekarang:
-            continue
-        if _slot_ada(w):
+        if w <= sekarang - dt.timedelta(minutes=LATENSI_AMAN_MENIT):
             ada.append(w)
-        if len(ada) >= batas:
+        if len(ada) >= hari:
             break
     return ada
 
 
 def unduh(waktu: dt.datetime, folder: Path) -> list[Path]:
+    """Segmen satu slot. Daftar KOSONG kalau ada satu saja yang tidak utuh.
+
+    SEGMEN YANG HILANG MEMBATALKAN SLOTNYA, tidak lagi dilewati. Dulu
+    segmen gagal cuma dicetak lalu `continue`, dan citranya tetap digambar
+    dari segmen yang ada. Hasilnya pita mendatar kosong selebar sepersepuluh
+    piringan, tanpa galat, tanpa tanda apa apa di katalog.
+
+    Dulu itu hampir tidak pernah kejadian sebab irama kita harian dan alur
+    kerjanya jalan lebih dari satu jam sesudah slotnya. Sejak irama jadi
+    sepuluh menit, slot termuda cuma dua puluh menit dari jam sekarang,
+    sedangkan berkas terakhir satu slot baru mendarat 14,1 menit sesudah
+    pengamatan. Jaraknya jadi tipis, dan slot setengah jadi bukan lagi
+    kemungkinan yang jauh.
+
+    Bingkai yang tidak digambar itu jujur, bingkai berlubang itu tidak."""
     folder.mkdir(parents=True, exist_ok=True)
     jalur = []
     for s in SEGMEN:
@@ -221,8 +272,9 @@ def unduh(waktu: dt.datetime, folder: Path) -> list[Path]:
             try:
                 tujuan.write_bytes(_ambil(url))
             except Exception as e:
-                print("    segmen %d gagal, %s" % (s, e))
-                continue
+                print("    segmen %d gagal, slot %s dibatalkan, %s"
+                      % (s, waktu.strftime("%d %b %H:%M"), str(e)[:60]))
+                return []
         jalur.append(tujuan)
     return jalur
 

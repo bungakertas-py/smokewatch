@@ -67,18 +67,39 @@ def main() -> int:
     if gambar_ulang:
         print("cap versi gambar berubah, %d jadi %d, semua bingkai digambar ulang"
               % (versi_lama(), H.VERSI_RENDER))
-    urut = sorted(H.slot_harian())
+    urut = sorted(H.deret_slot())
     if not urut:
-        print("tidak ada slot patokan yang terdaftar di ember, berhenti tanpa mengubah apa apa")
+        print("deret slot kosong, berhenti tanpa mengubah apa apa")
         return 0
-    print("patokan harian  : %02d:%02d UTC, %d hari"
-          % (H.JAM_PATOKAN, H.MENIT_PATOKAN, H.JUM_HARI))
-    print("bingkai dipakai : " + ", ".join(w.strftime("%d %b") for w in urut))
+    print("irama           : tiap %d menit, %d hari, %d slot"
+          % (H.JEDA_MENIT, H.JUM_HARI, len(urut)))
+    print("rentang         : %s sampai %s UTC"
+          % (urut[0].strftime("%d %b %H:%M"), urut[-1].strftime("%d %b %H:%M")))
+
 
     import numpy as np
 
+    # SIMPANAN KISI SEBENTAR, dan ini memangkas setengah unduhan.
+    #
+    # Penjejakan gerak butuh kisi dari 30 menit sebelumnya. Pada irama
+    # harian pasangan itu memang slot asing yang harus diunduh sendiri.
+    # Pada irama sepuluh menit dia SLOT TETANGGA, tiga langkah ke belakang
+    # di deret yang sama, dan gelung ini berjalan maju jadi kisinya baru
+    # saja dipegang.
+    #
+    # Tanpa simpanan, tiap slot mengunduh dua kali, dirinya dan
+    # pasangannya, yaitu 38 MB bukan 19 MB. Untuk 288 slot itu 5,5 GB jadi
+    # 11 GB, dan waktunya ikut dua kali lipat.
+    #
+    # Isinya dibatasi empat, cukup menjangkau 30 menit ke belakang pada
+    # irama sepuluh menit, dan satu kisi itu sekitar 12 MB jadi simpanannya
+    # tidak pernah lewat 50 MB.
+    simpanan: dict = {}
+
     def kisi_slot(w, sebab):
-        """Unduh satu slot, kembalikan kisi suhu dan redamannya."""
+        """Kisi suhu satu slot, dari simpanan kalau ada, kalau tidak diunduh."""
+        if w in simpanan:
+            return simpanan[w]
         print("  %s mengunduh %d segmen, %s"
               % (w.strftime("%d %b %H:%M"), len(H.SEGMEN), sebab))
         folder = SEMENTARA / w.strftime("%Y%m%d_%H%M")
@@ -86,12 +107,55 @@ def main() -> int:
             hasil = H.bingkai(H.unduh(w, folder))
         finally:
             shutil.rmtree(folder, ignore_errors=True)
-        return hasil if hasil else (None, None)
+        hasil = hasil if hasil else (None, None)
+        simpanan[w] = hasil
+        for tua in sorted(simpanan)[:-4]:
+            del simpanan[tua]
+        return hasil
+
+    # JATAH SLOT BARU PER JALAN. Tanpa ini pengisian pertama tidak akan
+    # pernah selesai, dia cuma akan kena batas enam jam GitHub Actions lalu
+    # mati di tengah dan mengulang dari awal di jalan berikutnya.
+    #
+    # Terukur 21 Oktober 2026, memasak satu slot sekitar 1,6 menit termasuk
+    # mengunduh 19 MB segmen inframerah. Dua hari berarti 288 slot, yaitu
+    # 7,7 jam, lewat dari batas. Jadi tiap jalan mengerjakan paling banyak
+    # JATAH slot baru lalu berhenti, dan sisanya diambil jalan berikutnya.
+    # Yang sudah jadi tersimpan di cache keluaran, jadi kemajuannya menumpuk
+    # dan deretnya penuh sesudah beberapa jalan.
+    #
+    # YANG TERBARU DIKERJAKAN DULU, sebab bingkai hari ini lebih berguna
+    # daripada bingkai kemarin lusa. Gelungnya sendiri tetap urut maju
+    # supaya pasangan penjejak gerak selalu sudah ada waktu dibutuhkan.
+    JATAH = int(os.environ.get("HIMAWARI_JATAH") or 60)
+
+    def _kurang(nama):
+        f = KELUARAN / nama
+        return not f.exists() or f.stat().st_size < 1000
+
+    # PANAHNYA IKUT DIHITUNG, bukan cuma gambarnya. Kalau yang dilihat cuma
+    # nama_bingkai, slot yang gambarnya sudah jadi tapi panahnya belum tidak
+    # akan pernah masuk jatah, jadi tidak pernah dikerjakan, dan panah itu
+    # hilang selamanya tanpa ada yang memberi tahu. Gampang terjadi sebab
+    # penjejakan gerak butuh slot pasangan 30 menit sebelumnya, dan pasangan
+    # itu bisa saja belum ada waktu gambarnya dibuat.
+    perlu = [w for w in urut
+             if gambar_ulang or _kurang(nama_bingkai(w)) or _kurang(nama_angin(w))]
+    if len(perlu) > JATAH:
+        pilih = set(sorted(perlu, reverse=True)[:JATAH])
+        print("slot baru       : %d, dikerjakan %d yang termuda dulu, "
+              "sisanya jalan berikutnya" % (len(perlu), JATAH))
+    else:
+        pilih = set(perlu)
+        if perlu:
+            print("slot baru       : %d, semuanya dikerjakan sekarang" % len(perlu))
+        else:
+            print("slot baru       : tidak ada, semua sudah tergambar")
 
     bingkai_jadi = []
     angin_jadi = []
     for w in urut:
-        tag = w.strftime("%d %b")
+        tag = w.strftime("%d %b %H:%M")
         berkas = KELUARAN / nama_bingkai(w)
         sudah = berkas.exists() and berkas.stat().st_size > 1000 and not gambar_ulang
         fa = KELUARAN / nama_angin(w)
@@ -99,9 +163,16 @@ def main() -> int:
 
         arr = None
         if sudah and not perlu_angin:
-            print("  %s sudah ada, dilewati" % tag)
             bingkai_jadi.append(w)
             angin_jadi.append(w)
+            continue
+        # Di luar jatah jalan ini. Gambar lamanya, kalau ada, TETAP DIAKUI
+        # sah supaya pembersih di bawah tidak menghapusnya.
+        if w not in pilih:
+            if sudah:
+                bingkai_jadi.append(w)
+                if not perlu_angin:
+                    angin_jadi.append(w)
             continue
 
         sebab = "gambarnya belum ada" if not sudah else "kisinya dipakai menjejak gerak"
@@ -154,7 +225,7 @@ def main() -> int:
     # yang hilang cukup gambarnya saja. Suhu kecerahan dan gerak awan sudah
     # terbit duluan dan tidak ikut gagal.
     tampak_jadi = []
-    for w in urut:
+    for w in sorted(H.slot_tampak()):
         ft = KELUARAN / nama_tampak(w)
         if ft.exists() and ft.stat().st_size > 1000 and not gambar_ulang:
             tampak_jadi.append(w)
